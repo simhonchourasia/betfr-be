@@ -449,7 +449,7 @@ var ResolveBetFunc gin.HandlerFunc = func(c *gin.Context) {
 		}
 
 		// Go over stakes and change balances accordingly
-		if err := HandleStakes(bet); err != nil {
+		if err := HandleStakes(ctx, &bet); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -462,7 +462,7 @@ var ResolveBetFunc gin.HandlerFunc = func(c *gin.Context) {
 		updateCreator := models.UpdateUserHelperStruct{
 			Username:  bet.CreatorName,
 			Operation: "$push",
-			Field:     "conflicted",
+			Field:     "conflictedbets",
 			IdVal:     bet.ID,
 		}
 		if err := UpdateBetHelper(c, ctx, updateCreator); err != nil {
@@ -472,7 +472,7 @@ var ResolveBetFunc gin.HandlerFunc = func(c *gin.Context) {
 		updateReceiver := models.UpdateUserHelperStruct{
 			Username:  bet.ReceiverName,
 			Operation: "$push",
-			Field:     "conflicted",
+			Field:     "conflictedbets",
 			IdVal:     bet.ID,
 		}
 		if err := UpdateBetHelper(c, ctx, updateReceiver); err != nil {

@@ -526,11 +526,11 @@ func transferBalance(ctx context.Context, loser models.User, winner models.User,
 	newLoserBalance := loser.Balances[*winner.Username] - amount
 	loserRes, err := userCollection.UpdateOne(
 		ctx,
-		bson.M{"username": *winner.Username},
+		bson.M{"username": *loser.Username},
 		bson.D{
 			{
 				Key:   "$set",
-				Value: bson.M{fmt.Sprintf("balances.%s", *loser.Username): newLoserBalance},
+				Value: bson.M{fmt.Sprintf("balances.%s", *winner.Username): newLoserBalance},
 			},
 			{
 				Key:   "$set",

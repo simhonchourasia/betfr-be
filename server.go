@@ -21,10 +21,12 @@ func main() {
 	router.Use(gin.Logger())
 	routes.UnprotectedUserRoutes(router) // Signup and login
 	routes.UnprotectedBetRoutes(router)
+	routes.UnprotectedStakeRoutes(router)
 
 	router.Use(middleware.Authentication)
 	routes.ProtectedUserRoutes(router)
 	routes.ProtectedBetRoutes(router)
+	routes.ProtectedStakeRoutes(router)
 
 	// API-2
 	router.GET("/api-1", func(c *gin.Context) {

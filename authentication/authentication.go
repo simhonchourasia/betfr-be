@@ -37,21 +37,25 @@ func ValidateToken(signedToken string) (*SignedDetails, error) {
 
 	claims, ok := token.Claims.(*SignedDetails)
 	if !ok {
-		return nil, fmt.Errorf("Invalid token")
+		return nil, fmt.Errorf("invalid token")
 	}
 
 	if claims.ExpiresAt < time.Now().Local().Unix() {
-		return nil, fmt.Errorf("Expired token")
+		return nil, fmt.Errorf("expired token")
 	}
 
 	return claims, nil
 }
 
 func GenerateAllTokens(username string) (string, string, error) {
+	expiryHours := 24
+	if config.GlobalConfig.Debug {
+		expiryHours = 168
+	}
 	claims := &SignedDetails{
 		Username: username,
 		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: time.Now().Local().Add(time.Duration(24) * time.Hour).Unix(),
+			ExpiresAt: time.Now().Local().Add(time.Duration(expiryHours) * time.Hour).Unix(),
 		},
 	}
 

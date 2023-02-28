@@ -17,6 +17,7 @@ type Config struct {
 	StakeCollection string `json:"stakeCollection"`
 	SecretKey       string `json:"secretKey"`
 	Port            string `json:"port"`
+	Debug           bool   `json:"debug"`
 }
 
 var configOnce sync.Once

@@ -20,7 +20,7 @@ import (
 var stakeCollection *mongo.Collection = database.OpenCollection(database.Client, config.GlobalConfig.StakeCollection)
 
 // Pass in
-var CreateStake gin.HandlerFunc = func(c *gin.Context) {
+var CreateStakeFunc gin.HandlerFunc = func(c *gin.Context) {
 	var ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -80,7 +80,7 @@ var CreateStake gin.HandlerFunc = func(c *gin.Context) {
 			bet.ReceiverStakedUnfilled = 0
 			bet.CreatorStakedUnfilled += stake.SharesStaked - stake.SharesFilled
 			// Then go through the receiver stake queue and fill up as many as possible
-			if err := fillStakes(ctx, &bet); err != nil {
+			if err := HandleStakes(ctx, &bet); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
@@ -100,7 +100,7 @@ var CreateStake gin.HandlerFunc = func(c *gin.Context) {
 			bet.CreatorStakedUnfilled = 0
 			bet.ReceiverStaked += stake.SharesStaked - stake.SharesFilled
 			// Then go through the receiver stake queue and fill up as many as possible
-			if err := fillStakes(ctx, &bet); err != nil {
+			if err := HandleStakes(ctx, &bet); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
@@ -134,13 +134,6 @@ var CreateStake gin.HandlerFunc = func(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
-// Handles all stakes for a bet
-// To be called when a bet is resolved
-func HandleStakes(bet models.Bet) error {
-	// TODO:
-	return nil
-}
-
 func updateStakeFilledHelper(ctx context.Context, stake models.Stake) error {
 	res, err := stakeCollection.UpdateOne(
 		ctx,
@@ -156,7 +149,9 @@ func updateStakeFilledHelper(ctx context.Context, stake models.Stake) error {
 	return nil
 }
 
-func fillStakes(ctx context.Context, bet *models.Bet) error {
+// Handles all stakes for a bet
+// To be called when a bet is resolved
+func HandleStakes(ctx context.Context, bet *models.Bet) error {
 	if bet.CreatorStakedUnfilled != 0 && bet.ReceiverStakedUnfilled != 0 {
 		panic(fmt.Errorf("bet %s has nonzero unfilled amounts for both sides. this should not happen", bet.ID.String()))
 	}
