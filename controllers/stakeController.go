@@ -111,15 +111,18 @@ var CreateStakeFunc gin.HandlerFunc = func(c *gin.Context) {
 	opts := options.Replace().SetUpsert(true)
 	filter := bson.M{"_id": bet.ID}
 
-	_, err := betCollection.ReplaceOne(
+	replaceRes, err := betCollection.ReplaceOne(
 		ctx,
 		filter,
 		bet,
 		opts,
 	)
 
-	if err != nil {
-		log.Printf("Could not update bet for stake\n")
+	if err != nil || replaceRes.MatchedCount == 0 {
+		log.Printf("Could not find/update bet for stake\n")
+		if err == nil {
+			err = fmt.Errorf("bet did not previously exist")
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -150,7 +153,7 @@ func updateStakeFilledHelper(ctx context.Context, stake models.Stake) error {
 }
 
 // Handles all stakes for a bet
-// To be called when a bet is resolved
+// To be called when a stake is created
 func HandleStakes(ctx context.Context, bet *models.Bet) error {
 	if bet.CreatorStakedUnfilled != 0 && bet.ReceiverStakedUnfilled != 0 {
 		panic(fmt.Errorf("bet %s has nonzero unfilled amounts for both sides. this should not happen", bet.ID.String()))
@@ -193,7 +196,6 @@ func HandleStakes(ctx context.Context, bet *models.Bet) error {
 					currStake.SharesFilled += remainder
 					bet.CreatorStakedUnfilled -= remainder
 					filledIdx += 1
-					// TODO: update the stake with updateone
 					updateStakeFilledHelper(ctx, currStake)
 				}
 			}
@@ -230,7 +232,6 @@ func HandleStakes(ctx context.Context, bet *models.Bet) error {
 					currStake.SharesFilled += remainder
 					bet.ReceiverStakedUnfilled -= remainder
 					filledIdx += 1
-					// TODO: update the stake with updateone
 					updateStakeFilledHelper(ctx, currStake)
 				}
 			}
@@ -238,7 +239,6 @@ func HandleStakes(ctx context.Context, bet *models.Bet) error {
 	}
 
 	newQueue := bet.ReceiverStakes[filledIdx:]
-	// TODO: update the bet with updateone to set the new receiverstakes queue
 	res, err := betCollection.UpdateOne(
 		ctx,
 		bson.M{"_id": bet.ID},
@@ -249,6 +249,95 @@ func HandleStakes(ctx context.Context, bet *models.Bet) error {
 	}
 	if res.MatchedCount == 0 {
 		return fmt.Errorf("could not find bet with ID %s to update for stake", bet.ID.String())
+	}
+
+	return nil
+}
+
+// Pays out stake owners
+// To be called when a bet is resolved
+// Instead of trying to match up stakes on both sides, the stake winners will be owed by the original bet's loser
+// And the original bet's loser will be owed by the stake losers
+func PayoutStakes(ctx context.Context, bet *models.Bet) error {
+	creatorRes := userCollection.FindOne(ctx, bson.M{"username": bet.CreatorName})
+	if creatorRes.Err() != nil {
+		return fmt.Errorf("bet creator %s not found", bet.CreatorName)
+	}
+	var creator models.User
+	if err := creatorRes.Decode(&creator); err != nil {
+		return err
+	}
+	receiverRes := userCollection.FindOne(ctx, bson.M{"username": bet.ReceiverName})
+	if receiverRes.Err() != nil {
+		return fmt.Errorf("bet creator %s not found", bet.ReceiverName)
+	}
+	var receiver models.User
+	if err := receiverRes.Decode(&receiver); err != nil {
+		return err
+	}
+
+	for _, stakeID := range bet.CreatorStakes {
+		stakeRes := stakeCollection.FindOne(ctx, bson.M{"_id": stakeID})
+		if stakeRes.Err() != nil {
+			return fmt.Errorf("stake id %s not found", stakeID.String())
+		}
+		var stake models.Stake
+		if err := stakeRes.Decode(&stake); err != nil {
+			return err
+		}
+
+		creatorStakerRes := userCollection.FindOne(ctx, bson.M{"username": stake.OwnerName})
+		if creatorRes.Err() != nil {
+			return fmt.Errorf("stake winner %s not found", stake.OwnerName)
+		}
+		var creatorStaker models.User
+		if err := creatorStakerRes.Decode(&creatorStaker); err != nil {
+			return err
+		}
+
+		if bet.OverallStatus == models.CreatorWon {
+			// Make original bet's loser (bet receiver, in this case) pay out to stake winners
+			if err := transferBalance(ctx, receiver, creatorStaker, stake.SharesFilled*bet.CreatorAmount); err != nil {
+				return err
+			}
+		} else {
+			// Make stake losers pay out to original bet's loser (stake creator, in this case)
+			if err := transferBalance(ctx, creatorStaker, creator, stake.SharesFilled*bet.ReceiverAmount); err != nil {
+				return err
+			}
+		}
+	}
+
+	for _, stakeID := range bet.ReceiverStakes {
+		stakeRes := stakeCollection.FindOne(ctx, bson.M{"_id": stakeID})
+		if stakeRes.Err() != nil {
+			return fmt.Errorf("stake id %s not found", stakeID.String())
+		}
+		var stake models.Stake
+		if err := stakeRes.Decode(&stake); err != nil {
+			return err
+		}
+
+		receiverStakerRes := userCollection.FindOne(ctx, bson.M{"username": stake.OwnerName})
+		if creatorRes.Err() != nil {
+			return fmt.Errorf("stake winner %s not found", stake.OwnerName)
+		}
+		var receiverStaker models.User
+		if err := receiverStakerRes.Decode(&receiverStaker); err != nil {
+			return err
+		}
+
+		if bet.OverallStatus == models.CreatorWon {
+			// Make stake losers pay out to original bet's loser (stake receiver, in this case)
+			if err := transferBalance(ctx, receiverStaker, receiver, stake.SharesFilled*bet.CreatorAmount); err != nil {
+				return err
+			}
+		} else {
+			// Make original bet's loser (bet creator, in this case) pay out to stake winners
+			if err := transferBalance(ctx, creator, receiverStaker, stake.SharesFilled*bet.ReceiverAmount); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil

@@ -6,7 +6,7 @@ type BetStatus int8
 type BetRequestStatus int8
 
 const (
-	Undecided BetStatus = 0
+	Undecided BetStatus = iota
 	CreatorWon
 	ReceiverWon
 	Conflicted

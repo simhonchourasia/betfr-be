@@ -16,3 +16,6 @@
 
 # config file
 config/default.json
+
+# binary
+betfr-be

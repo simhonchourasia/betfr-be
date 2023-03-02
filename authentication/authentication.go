@@ -52,6 +52,7 @@ func GenerateAllTokens(username string) (string, string, error) {
 	if config.GlobalConfig.Debug {
 		expiryHours = 168
 	}
+	log.Printf("Created JWT token expiring in %d hours\n", expiryHours)
 	claims := &SignedDetails{
 		Username: username,
 		StandardClaims: jwt.StandardClaims{

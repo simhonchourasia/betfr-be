@@ -74,6 +74,9 @@ var CreateBetReqFunc gin.HandlerFunc = func(c *gin.Context) {
 	bet.ReceiverStatus = models.Undecided
 	bet.CreatorStaked = 0
 	bet.ReceiverStaked = 0
+	if bet.NumShares == 0 {
+		bet.NumShares = 10
+	}
 	bet.CreatorStakedUnfilled = 0
 	bet.ReceiverStakedUnfilled = 0
 	bet.CreatorStakes = make([]primitive.ObjectID, 0)
@@ -383,13 +386,15 @@ var ResolveBetFunc gin.HandlerFunc = func(c *gin.Context) {
 			bothStatusDecided = true
 		}
 	}
+	log.Printf("Both status decided for bet resolve: %t\n", bothStatusDecided)
 	if bothStatusDecided {
 		if bet.ReceiverStatus != bet.CreatorStatus {
 			bet.OverallStatus = models.Conflicted
 		} else {
+			// bet is fully resolved
 			bet.OverallStatus = bet.CreatorStatus
 		}
-		// Either way, remove from ongoing bets
+		// Either way, remove from ongoing bets (either conflicted or resolved)
 		// Remove from ongoing bets
 		updateCreator := models.UpdateUserHelperStruct{
 			Username:  bet.CreatorName,
@@ -439,9 +444,9 @@ var ResolveBetFunc gin.HandlerFunc = func(c *gin.Context) {
 		// Handle balances for the winner and loser
 		var balanceErr error
 		if bet.OverallStatus == models.CreatorWon {
-			balanceErr = transferBalance(ctx, receiver, creator, bet.CreatorAmount)
+			balanceErr = transferBalance(ctx, receiver, creator, bet.CreatorAmount*bet.NumShares)
 		} else if bet.OverallStatus == models.ReceiverWon {
-			balanceErr = transferBalance(ctx, receiver, creator, bet.ReceiverAmount)
+			balanceErr = transferBalance(ctx, creator, receiver, bet.ReceiverAmount*bet.NumShares)
 		}
 		if balanceErr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": balanceErr.Error()})
@@ -449,7 +454,7 @@ var ResolveBetFunc gin.HandlerFunc = func(c *gin.Context) {
 		}
 
 		// Go over stakes and change balances accordingly
-		if err := HandleStakes(ctx, &bet); err != nil {
+		if err := PayoutStakes(ctx, &bet); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -480,6 +485,25 @@ var ResolveBetFunc gin.HandlerFunc = func(c *gin.Context) {
 			return
 		}
 		msg = fmt.Sprintf("Conflicted bet between %s and %s", bet.CreatorName, bet.ReceiverName)
+	}
+
+	// Finally, update the bet itself
+	opts := options.Replace().SetUpsert(true)
+	filter := bson.M{"_id": bet.ID}
+
+	res, err := betCollection.ReplaceOne(
+		ctx,
+		filter,
+		bet,
+		opts,
+	)
+	if err != nil || res.MatchedCount == 0 {
+		log.Printf("Could not update bet when trying to resolve\n")
+		if err == nil {
+			err = fmt.Errorf("bet did not previously exist when trying to update/replace")
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"msg": msg})
