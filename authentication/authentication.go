@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
+	"github.com/gin-gonic/gin"
 	"github.com/simhonchourasia/betfr-be/config"
 	"github.com/simhonchourasia/betfr-be/database"
 	"go.mongodb.org/mongo-driver/bson"
@@ -56,12 +57,14 @@ func GenerateAllTokens(username string) (string, string, error) {
 	claims := &SignedDetails{
 		Username: username,
 		StandardClaims: jwt.StandardClaims{
+			Issuer:    username,
 			ExpiresAt: time.Now().Local().Add(time.Duration(expiryHours) * time.Hour).Unix(),
 		},
 	}
 
 	refreshClaims := &SignedDetails{
 		StandardClaims: jwt.StandardClaims{
+			Issuer:    username,
 			ExpiresAt: time.Now().Local().Add(time.Duration(24) * time.Duration(7) * time.Hour).Unix(),
 		},
 	}
@@ -104,4 +107,19 @@ func UpdateAllTokens(signedToken string, signedRefreshToken string, username str
 		log.Panic(err)
 		return
 	}
+}
+
+func CheckUserPermissions(c *gin.Context, username *string) error {
+	un, ok := c.Get("username")
+	uns, isString := un.(string)
+	if !ok || !isString {
+		return fmt.Errorf("could not get username from context")
+	}
+	fmt.Printf("current user: %s\n", uns)
+	if ok && isString {
+		if *username == uns {
+			return nil
+		}
+	}
+	return fmt.Errorf("current user %s does not have the required permissions", uns)
 }

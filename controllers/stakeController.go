@@ -19,7 +19,7 @@ import (
 
 var stakeCollection *mongo.Collection = database.OpenCollection(database.Client, config.GlobalConfig.StakeCollection)
 
-// Pass in
+// Pass in bet, owner name, number of shares requested, backing creator/receiver, comment
 var CreateStakeFunc gin.HandlerFunc = func(c *gin.Context) {
 	var ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -39,6 +39,7 @@ var CreateStakeFunc gin.HandlerFunc = func(c *gin.Context) {
 	stake := models.Stake{
 		ID:             primitive.NewObjectID(),
 		Underlying:     stakeReq.Underlying,
+		OwnerName:      stakeReq.OwnerName,
 		SharesStaked:   stakeReq.NumShares,
 		SharesFilled:   0,
 		BackingCreator: stakeReq.BackingCreator,
@@ -65,46 +66,91 @@ var CreateStakeFunc gin.HandlerFunc = func(c *gin.Context) {
 		panic(fmt.Errorf("bet %s has negative filled amount for a side. this should not happen", bet.ID.String()))
 	}
 
+	// if stakeReq.BackingCreator {
+	// 	bet.CreatorStaked += stake.SharesStaked
+	// 	if stake.SharesStaked <= bet.ReceiverStakedUnfilled {
+	// 		// Case 1: We can fully fill this stake; it will not go into the bet's queue
+	// 		stake.SharesFilled = stake.SharesStaked
+	// 		bet.ReceiverStakedUnfilled -= stake.SharesFilled
+	// 		// Update the receiver's stakes to be filled
+	// 		// creatorStakeNum := stake.SharesFilled
+	// 		for _, stakeID := range bet.ReceiverStakes {
+	// 			stakeRes := userCollection.FindOne(ctx, bson.M{"_id": stakeID})
+	// 			if stakeRes.Err() != nil {
+	// 				c.JSON(http.StatusInternalServerError, gin.H{"error": stakeRes.Err()})
+	// 				return
+	// 			}
+	// 			var currStake models.Stake
+	// 			if err := stakeRes.Decode(&currStake); err != nil {
+	// 				c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+	// 				return
+	// 			}
+
+	// 			remainder := currStake.SharesStaked - currStake.SharesFilled
+	// 			if bet.ReceiverStakedUnfilled < remainder {
+	// 				// Case 1: We can only fill the queued stake partially, so we do that and update the stake and then end
+	// 				// Note that we do not remove anything from the queue in this case
+	// 				currStake.SharesFilled += bet.ReceiverStakedUnfilled
+	// 				bet.ReceiverStakedUnfilled = 0
+	// 				updateStakeFilledHelper(ctx, currStake)
+	// 				break
+	// 			} else {
+	// 				// Case 2: We can fill up the queued stake entirely, so we do that and pop it from the queue and move on
+	// 				// Note that we will remove things from the queue in this case
+	// 				currStake.SharesFilled += remainder
+	// 				bet.ReceiverStakedUnfilled -= remainder
+	// 				filledIdx += 1
+	// 				updateStakeFilledHelper(ctx, currStake)
+	// 			}
+	// 		}
+
+	// 	} else {
+	// 		// Case 2: We can partially fill this stake (or not at all)
+	// 		// It will sit in the bet's queue until it can be further filled
+	// 		// And it may help fill other stakes on the other side
+	// 		bet.CreatorStakes = append(bet.CreatorStakes, stake.ID)
+	// 		stake.SharesFilled = bet.ReceiverStakedUnfilled
+	// 		bet.ReceiverStakedUnfilled = 0
+	// 		bet.CreatorStakedUnfilled += stake.SharesStaked - stake.SharesFilled
+	// 		// Then go through the receiver stake queue and fill up as many as possible
+	// 		if err := HandleStakes(ctx, &bet); err != nil {
+	// 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	// 			return
+	// 		}
+	// 	}
+	// } else {
+	// 	bet.ReceiverStaked += stake.SharesStaked
+	// 	// Stake is backing up the Receiver
+	// 	// Symmetric logic to when creator is backed up
+	// 	if stake.SharesStaked <= bet.CreatorStakedUnfilled {
+	// 		// Case 1: We can fully fill this stake; it will not go into the bet's queue
+	// 		stake.SharesFilled = stake.SharesStaked
+	// 		bet.CreatorStakedUnfilled -= stake.SharesFilled
+	// 	} else {
+	// 		// Case 2: We can partially fill this stake (or not at all)
+	// 		bet.ReceiverStakes = append(bet.ReceiverStakes, stake.ID)
+	// 		stake.SharesFilled = bet.CreatorStakedUnfilled
+	// 		bet.CreatorStakedUnfilled = 0
+	// 		bet.ReceiverStaked += stake.SharesStaked - stake.SharesFilled
+	// 		// Then go through the receiver stake queue and fill up as many as possible
+	// 		if err := HandleStakes(ctx, &bet); err != nil {
+	// 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	// 			return
+	// 		}
+	// 	}
+	// }
+
 	if stakeReq.BackingCreator {
 		bet.CreatorStaked += stake.SharesStaked
-		if stake.SharesStaked <= bet.ReceiverStakedUnfilled {
-			// Case 1: We can fully fill this stake; it will not go into the bet's queue
-			stake.SharesFilled = stake.SharesStaked
-			bet.ReceiverStakedUnfilled -= stake.SharesFilled
-		} else {
-			// Case 2: We can partially fill this stake (or not at all)
-			// It will sit in the bet's queue until it can be further filled
-			// And it may help fill other stakes on the other side
-			bet.CreatorStakes = append(bet.CreatorStakes, stake.ID)
-			stake.SharesFilled = bet.ReceiverStakedUnfilled
-			bet.ReceiverStakedUnfilled = 0
-			bet.CreatorStakedUnfilled += stake.SharesStaked - stake.SharesFilled
-			// Then go through the receiver stake queue and fill up as many as possible
-			if err := HandleStakes(ctx, &bet); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-		}
+		bet.CreatorStakedUnfilled += stake.SharesStaked
 	} else {
 		bet.ReceiverStaked += stake.SharesStaked
-		// Stake is backing up the Receiver
-		// Symmetric logic to when creator is backed up
-		if stake.SharesStaked <= bet.CreatorStakedUnfilled {
-			// Case 1: We can fully fill this stake; it will not go into the bet's queue
-			stake.SharesFilled = stake.SharesStaked
-			bet.CreatorStakedUnfilled -= stake.SharesFilled
-		} else {
-			// Case 2: We can partially fill this stake (or not at all)
-			bet.ReceiverStakes = append(bet.CreatorStakes, stake.ID)
-			stake.SharesFilled = bet.CreatorStakedUnfilled
-			bet.CreatorStakedUnfilled = 0
-			bet.ReceiverStaked += stake.SharesStaked - stake.SharesFilled
-			// Then go through the receiver stake queue and fill up as many as possible
-			if err := HandleStakes(ctx, &bet); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-		}
+		bet.ReceiverStakedUnfilled += stake.SharesStaked
+	}
+
+	if err := HandleStakes(ctx, &bet); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 
 	// Update bet and insert stake
@@ -130,6 +176,18 @@ var CreateStakeFunc gin.HandlerFunc = func(c *gin.Context) {
 	res, err := stakeCollection.InsertOne(ctx, stake)
 	if err != nil {
 		log.Printf("Could not create stake\n")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Add to stake owner's list
+	updateOwner := models.UpdateUserHelperStruct{
+		Username:  stakeReq.OwnerName,
+		Operation: "$push",
+		Field:     "ongoingstakes",
+		IdVal:     stake.ID,
+	}
+	if err := UpdateBetHelper(ctx, updateOwner); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -295,6 +353,26 @@ func PayoutStakes(ctx context.Context, bet *models.Bet) error {
 			return err
 		}
 
+		// Move from ongoing to resolved stake list
+		updateOwner := models.UpdateUserHelperStruct{
+			Username:  *creatorStaker.Username,
+			Operation: "$pullAll",
+			Field:     "ongoingstakes",
+			IdVal:     stake.ID,
+		}
+		if err := UpdateBetHelper(ctx, updateOwner); err != nil {
+			return err
+		}
+		updateOwner = models.UpdateUserHelperStruct{
+			Username:  *creatorStaker.Username,
+			Operation: "$push",
+			Field:     "resolvedstakes",
+			IdVal:     stake.ID,
+		}
+		if err := UpdateBetHelper(ctx, updateOwner); err != nil {
+			return err
+		}
+
 		if bet.OverallStatus == models.CreatorWon {
 			// Make original bet's loser (bet receiver, in this case) pay out to stake winners
 			if err := transferBalance(ctx, receiver, creatorStaker, stake.SharesFilled*bet.CreatorAmount); err != nil {
@@ -324,6 +402,26 @@ func PayoutStakes(ctx context.Context, bet *models.Bet) error {
 		}
 		var receiverStaker models.User
 		if err := receiverStakerRes.Decode(&receiverStaker); err != nil {
+			return err
+		}
+
+		// Move from ongoing to resolved stake list
+		updateOwner := models.UpdateUserHelperStruct{
+			Username:  *receiverStaker.Username,
+			Operation: "$pullAll",
+			Field:     "ongoingstakes",
+			IdVal:     stake.ID,
+		}
+		if err := UpdateBetHelper(ctx, updateOwner); err != nil {
+			return err
+		}
+		updateOwner = models.UpdateUserHelperStruct{
+			Username:  *receiverStaker.Username,
+			Operation: "$push",
+			Field:     "resolvedstakes",
+			IdVal:     stake.ID,
+		}
+		if err := UpdateBetHelper(ctx, updateOwner); err != nil {
 			return err
 		}
 

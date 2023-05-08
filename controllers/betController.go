@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/simhonchourasia/betfr-be/authentication"
 	"github.com/simhonchourasia/betfr-be/config"
 	"github.com/simhonchourasia/betfr-be/database"
 	"github.com/simhonchourasia/betfr-be/models"
@@ -31,6 +32,14 @@ var CreateBetReqFunc gin.HandlerFunc = func(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	// Check that the user sending the bet request is the one logged in
+	if permissionErr := authentication.CheckUserPermissions(c, &bet.CreatorName); permissionErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": permissionErr.Error()})
+		return
+	}
+
+	fmt.Printf("\naslkdfjlk\n")
 
 	fmt.Printf("%v\n", bet)
 
@@ -93,7 +102,6 @@ var CreateBetReqFunc gin.HandlerFunc = func(c *gin.Context) {
 		return
 	}
 
-	// TODO: handle bet request accept/decline flow
 	betObjectId := (res.InsertedID).(primitive.ObjectID)
 	updateCreatorBet := bson.D{
 		{Key: "$push", Value: bson.M{"outgoingbetreqs": betObjectId}},
@@ -118,7 +126,7 @@ var CreateBetReqFunc gin.HandlerFunc = func(c *gin.Context) {
 }
 
 // Helper function to be used in handling bet requests
-func UpdateBetHelper(c *gin.Context, ctx context.Context, friendUpdate models.UpdateUserHelperStruct) error {
+func UpdateBetHelper(ctx context.Context, friendUpdate models.UpdateUserHelperStruct) error {
 	fmt.Printf("update bet: %v\n", friendUpdate)
 	upsert := true
 	filter := bson.M{"username": friendUpdate.Username}
@@ -180,6 +188,12 @@ var HandleBetReqFunc gin.HandlerFunc = func(c *gin.Context) {
 	}
 	if err := betResult.Decode(&bet); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Check that the user accepting the bet request is the one logged in
+	if permissionErr := authentication.CheckUserPermissions(c, &bet.ReceiverName); permissionErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": permissionErr.Error()})
 		return
 	}
 
@@ -257,7 +271,7 @@ var HandleBetReqFunc gin.HandlerFunc = func(c *gin.Context) {
 		Field:     "outgoingbetreqs",
 		IdVal:     betId,
 	}
-	if err := UpdateBetHelper(c, ctx, updateCreator); err != nil {
+	if err := UpdateBetHelper(ctx, updateCreator); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -267,7 +281,7 @@ var HandleBetReqFunc gin.HandlerFunc = func(c *gin.Context) {
 		Field:     "incomingbetreqs",
 		IdVal:     betId,
 	}
-	if err := UpdateBetHelper(c, ctx, updateReceiver); err != nil {
+	if err := UpdateBetHelper(ctx, updateReceiver); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -281,7 +295,7 @@ var HandleBetReqFunc gin.HandlerFunc = func(c *gin.Context) {
 			Field:     "ongoingbets",
 			IdVal:     betId,
 		}
-		if err := UpdateBetHelper(c, ctx, updateCreator); err != nil {
+		if err := UpdateBetHelper(ctx, updateCreator); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -291,7 +305,7 @@ var HandleBetReqFunc gin.HandlerFunc = func(c *gin.Context) {
 			Field:     "ongoingbets",
 			IdVal:     betId,
 		}
-		if err := UpdateBetHelper(c, ctx, updateReceiver); err != nil {
+		if err := UpdateBetHelper(ctx, updateReceiver); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -314,8 +328,14 @@ var ResolveBetFunc gin.HandlerFunc = func(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
 	fmt.Printf("%v\n", betResolve)
+
+	// Check that the user modifying the bet request is the one logged in
+	if permissionErr := authentication.CheckUserPermissions(c, &betResolve.Username); permissionErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": permissionErr.Error()})
+		fmt.Printf("bet request modifier is not the one logged in\n")
+		return
+	}
 
 	if validationErr := validate.Struct(betResolve); validationErr != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error()})
@@ -331,6 +351,15 @@ var ResolveBetFunc gin.HandlerFunc = func(c *gin.Context) {
 	}
 	if err := betResult.Decode(&bet); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Ensure that only one of the two members of the bet can provide updates for it
+	creatorPermissible := authentication.CheckUserPermissions(c, &bet.CreatorName)
+	receiverPermissible := authentication.CheckUserPermissions(c, &bet.ReceiverName)
+	if creatorPermissible != nil && receiverPermissible != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": creatorPermissible.Error()})
+		fmt.Printf("logged in user is not one of the bettors\n")
 		return
 	}
 
@@ -402,7 +431,7 @@ var ResolveBetFunc gin.HandlerFunc = func(c *gin.Context) {
 			Field:     "ongoingbets",
 			IdVal:     bet.ID,
 		}
-		if err := UpdateBetHelper(c, ctx, updateCreator); err != nil {
+		if err := UpdateBetHelper(ctx, updateCreator); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -412,7 +441,7 @@ var ResolveBetFunc gin.HandlerFunc = func(c *gin.Context) {
 			Field:     "ongoingbets",
 			IdVal:     bet.ID,
 		}
-		if err := UpdateBetHelper(c, ctx, updateReceiver); err != nil {
+		if err := UpdateBetHelper(ctx, updateReceiver); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -427,7 +456,7 @@ var ResolveBetFunc gin.HandlerFunc = func(c *gin.Context) {
 			Field:     "resolvedbets",
 			IdVal:     bet.ID,
 		}
-		if err := UpdateBetHelper(c, ctx, updateCreator); err != nil {
+		if err := UpdateBetHelper(ctx, updateCreator); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -437,7 +466,7 @@ var ResolveBetFunc gin.HandlerFunc = func(c *gin.Context) {
 			Field:     "resolvedbets",
 			IdVal:     bet.ID,
 		}
-		if err := UpdateBetHelper(c, ctx, updateReceiver); err != nil {
+		if err := UpdateBetHelper(ctx, updateReceiver); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -470,7 +499,7 @@ var ResolveBetFunc gin.HandlerFunc = func(c *gin.Context) {
 			Field:     "conflictedbets",
 			IdVal:     bet.ID,
 		}
-		if err := UpdateBetHelper(c, ctx, updateCreator); err != nil {
+		if err := UpdateBetHelper(ctx, updateCreator); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -480,7 +509,7 @@ var ResolveBetFunc gin.HandlerFunc = func(c *gin.Context) {
 			Field:     "conflictedbets",
 			IdVal:     bet.ID,
 		}
-		if err := UpdateBetHelper(c, ctx, updateReceiver); err != nil {
+		if err := UpdateBetHelper(ctx, updateReceiver); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator"
 	"github.com/simhonchourasia/betfr-be/authentication"
@@ -74,7 +75,7 @@ var SignUpFunc gin.HandlerFunc = func(c *gin.Context) {
 
 	user.ID = primitive.NewObjectID()
 
-	token, refreshToken, err := authentication.GenerateAllTokens(*user.Email)
+	token, refreshToken, err := authentication.GenerateAllTokens(*user.Username)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 	}
@@ -92,6 +93,8 @@ var SignUpFunc gin.HandlerFunc = func(c *gin.Context) {
 	user.ResolvedBets = make([]primitive.ObjectID, 0)
 	user.ConflictedBets = make([]primitive.ObjectID, 0)
 	user.OngoingBets = make([]primitive.ObjectID, 0)
+	user.ResolvedStakes = make([]primitive.ObjectID, 0)
+	user.OngoingStakes = make([]primitive.ObjectID, 0)
 	user.Balances = make(map[string]int64)
 	user.TotalBalance = 0
 
@@ -131,14 +134,69 @@ var LoginFunc gin.HandlerFunc = func(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Incorrect password"})
 	}
 
-	token, refreshToken, err := authentication.GenerateAllTokens(*user.Email)
+	token, refreshToken, err := authentication.GenerateAllTokens(*user.Username)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	authentication.UpdateAllTokens(token, refreshToken, *matchingUser.Username)
 
+	c.SetCookie("jwt", token, 24*60*60, "/", config.GlobalConfig.Domain, false, true)
+
 	c.JSON(http.StatusOK, matchingUser)
+}
+
+func GetClaimsFromCookie(c *gin.Context) (*jwt.StandardClaims, int, error) {
+	cookie, err := c.Cookie("jwt")
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+
+	token, err := jwt.ParseWithClaims(
+		cookie,
+		&jwt.StandardClaims{},
+		func(token *jwt.Token) (interface{}, error) {
+			return []byte(config.GlobalConfig.SecretKey), nil
+		},
+	)
+	if err != nil {
+		return nil, http.StatusUnauthorized, err
+	}
+
+	claims := token.Claims.(*jwt.StandardClaims)
+	return claims, http.StatusOK, nil
+}
+
+var GetUserFunc gin.HandlerFunc = func(c *gin.Context) {
+	var ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	claims, statusCode, err := GetClaimsFromCookie(c)
+	if err != nil {
+		c.JSON(statusCode, gin.H{"error": err.Error()})
+	}
+
+	var user models.User
+	foundUser := userCollection.FindOne(ctx, bson.M{"username": claims.Issuer})
+	if foundUser.Err() != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User with email not found"})
+		return
+	}
+	if err := foundUser.Decode(&user); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, user)
+}
+
+var LogoutFunc gin.HandlerFunc = func(c *gin.Context) {
+	// var ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
+	// defer cancel()
+
+	c.SetCookie("jwt", "", -1, "/", config.GlobalConfig.Domain, false, true)
+
+	c.JSON(http.StatusOK, gin.H{"msg": "logged out"})
 }
 
 var DeleteUserFunc gin.HandlerFunc = func(c *gin.Context) {
@@ -207,6 +265,7 @@ func UpdateUserHelper(c *gin.Context, ctx context.Context, friendUpdate models.U
 // TODO: add support for blocking users with this
 // Adds receiver to outgoing friend reqs of sender and adds sender to incoming reqs of receiver
 // Note that accepting a friend request doesn't require a previous friend request to be sent (will force friendship)
+// API will only succeed if username in context matches token
 var SendFriendReqFunc gin.HandlerFunc = func(c *gin.Context) {
 	var ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -215,6 +274,11 @@ var SendFriendReqFunc gin.HandlerFunc = func(c *gin.Context) {
 
 	if err := c.BindJSON(&friendReq); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	// Check that the user using the friend request send API is the one logged in
+	if permissionErr := authentication.CheckUserPermissions(c, friendReq.Sender); permissionErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": permissionErr.Error()})
 		return
 	}
 	if *friendReq.Receiver == *friendReq.Sender {
@@ -325,7 +389,11 @@ var ResolveFriendReqFunc gin.HandlerFunc = func(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
+	// Check that the user accepting the friend request is the one logged in
+	if permissionErr := authentication.CheckUserPermissions(c, friendReq.Receiver); permissionErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": permissionErr.Error()})
+		return
+	}
 	if *friendReq.Receiver == *friendReq.Sender {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Can't add yourself as a friend!"})
 		return

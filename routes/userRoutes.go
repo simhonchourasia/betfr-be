@@ -8,6 +8,8 @@ import (
 func UnprotectedUserRoutes(incomingRoutes *gin.Engine) {
 	incomingRoutes.POST("/users/signup", controllers.SignUpFunc)
 	incomingRoutes.POST("/users/login", controllers.LoginFunc)
+	incomingRoutes.GET("/users/get", controllers.GetUserFunc)
+	incomingRoutes.POST("/users/logout", controllers.LogoutFunc)
 	incomingRoutes.DELETE("/users/deleteuser", controllers.DeleteUserFunc)
 }
 

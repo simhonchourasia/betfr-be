@@ -16,6 +16,7 @@ type Config struct {
 	BetCollection   string `json:"betCollection"`
 	StakeCollection string `json:"stakeCollection"`
 	SecretKey       string `json:"secretKey"`
+	Domain          string `json:"domain"`
 	Port            string `json:"port"`
 	Debug           bool   `json:"debug"`
 }
