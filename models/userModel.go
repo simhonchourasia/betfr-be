@@ -6,7 +6,7 @@ type User struct {
 	ID                 primitive.ObjectID   `bson:"_id,omitempty"`
 	Username           *string              `json:"username" validate:"required,min=1,max=30"`
 	Email              *string              `json:"email" validate:"email,required"`
-	Password           *string              `json:"password" validate:"required,min=6"`
+	Password           *string              `json:"password" validate:"required,min=6,max=100"`
 	Token              *string              `json:"token"`
 	RefreshToken       *string              `json:"refreshtoken"`
 	OutgoingFriendReqs []string             `json:"outgoingfriendreqs"`

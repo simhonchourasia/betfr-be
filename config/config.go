@@ -19,6 +19,7 @@ type Config struct {
 	Domain          string `json:"domain"`
 	Port            string `json:"port"`
 	Debug           bool   `json:"debug"`
+	OriginFE        string `json:originFE"`
 }
 
 var configOnce sync.Once

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -46,10 +47,17 @@ var SignUpFunc gin.HandlerFunc = func(c *gin.Context) {
 	var user models.User
 	if err := c.BindJSON(&user); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
 	if validationErr := validate.Struct(user); validationErr != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error()})
+		errorMsg := ""
+		if strings.Contains(validationErr.Error(), "Password") {
+			errorMsg = "Password must be between 6 and 100 characters"
+		} else {
+			errorMsg = "Username cannot be more than 30 characters"
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": errorMsg})
 		return
 	}
 
@@ -62,7 +70,7 @@ var SignUpFunc gin.HandlerFunc = func(c *gin.Context) {
 	}
 
 	if numSameEmail+numSameUsername > 0 {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "This username already exists"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "This email or username already exists"})
 		return
 	}
 	if numSameEmail > 0 {
@@ -98,13 +106,13 @@ var SignUpFunc gin.HandlerFunc = func(c *gin.Context) {
 	user.Balances = make(map[string]int64)
 	user.TotalBalance = 0
 
-	res, err := userCollection.InsertOne(ctx, user)
+	_, err = userCollection.InsertOne(ctx, user)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "User signup unsuccessful"})
 		return
 	}
 
-	c.JSON(http.StatusOK, res)
+	c.JSON(http.StatusOK, "ok")
 }
 
 var LoginFunc gin.HandlerFunc = func(c *gin.Context) {
@@ -134,7 +142,7 @@ var LoginFunc gin.HandlerFunc = func(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Incorrect password"})
 	}
 
-	token, refreshToken, err := authentication.GenerateAllTokens(*user.Username)
+	token, refreshToken, err := authentication.GenerateAllTokens(*matchingUser.Username)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -174,6 +182,12 @@ var GetUserFunc gin.HandlerFunc = func(c *gin.Context) {
 	claims, statusCode, err := GetClaimsFromCookie(c)
 	if err != nil {
 		c.JSON(statusCode, gin.H{"error": err.Error()})
+		return
+	}
+
+	if claims == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Not logged in"})
+		return
 	}
 
 	var user models.User

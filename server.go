@@ -19,6 +19,7 @@ func main() {
 	router := gin.New()
 	// TODO: specify trusted proxies
 	router.Use(gin.Logger())
+	router.Use(middleware.CORSMiddleware)
 	routes.UnprotectedUserRoutes(router) // Signup and login
 	routes.UnprotectedBetRoutes(router)
 	routes.UnprotectedStakeRoutes(router)
